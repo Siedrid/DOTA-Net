@@ -7,13 +7,16 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None  # Disables the decompression bomb check
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torchvision.utils import draw_bounding_boxes
 from torch import Tensor
 from torchvision import tv_tensors
 from torchvision.transforms import v2
+import torchvision.transforms.functional as F
 import json
 import os
 import sys
 import torchvision.transforms.functional as TF
+import matplotlib.pyplot as plt
 
 class DOTA_DATASET(Dataset):
     def __init__(self, csv_file: str, root_img_dir: str, tile_size=1024, overlap=200, transform=None):
@@ -104,6 +107,73 @@ class DOTA_DATASET(Dataset):
         target = {"boxes": sample["boxes"], "labels": sample["labels"]}
         return sample["image"], target
 
+## New Dataset Class
+class DOTA_DATASET_v2(Dataset):
+    def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None):
+        self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
+        self.root_img_dir = root_img_dir
+        self.tile_size = tile_size
+        self.overlap = overlap
+        self.transform = transform
+        self.tiles = []  # Store precomputed tiles
+
+        # **PRECOMPUTE SLIDING WINDOW TILES**
+        for idx in range(len(self.annotations)):
+            img_name = self.annotations.iloc[idx, 0]
+            boxes_string = self.annotations.iloc[idx, 1]
+            labels_string = self.annotations.iloc[idx, 2]
+
+            # Read and convert the full image ONCE
+            img_path = Path(self.root_img_dir) / img_name
+            img = PIL.Image.open(img_path).convert("RGB")  # Ensure RGB mode
+            w, h = img.size
+
+            # Parse bounding boxes
+            boxes = [list(map(int, box.split())) for box in boxes_string.split(";")]
+            labels = [int(label) for label in labels_string.split(';')]
+
+            stride = tile_size - overlap
+            for y in range(0, h - overlap, stride):
+                for x in range(0, w - overlap, stride):
+                    tile_boxes, box_indices = self._adjust_boxes(boxes, x, y, tile_size)
+                    tile_labels = [labels[i] for i in box_indices]
+
+                    if tile_boxes:  # Only store valid tiles with at least one box
+                        tile_img = TF.crop(img, y, x, tile_size, tile_size)
+                        self.tiles.append((tile_img, tile_boxes, tile_labels))
+
+    def _adjust_boxes(self, boxes, tile_x, tile_y, tile_size):
+        """Clips bounding boxes and returns valid ones with indices."""
+        tile_boxes, box_indices = [], []
+        for i, (x_min, y_min, x_max, y_max) in enumerate(boxes):
+            # Shift and clip coordinates
+            x_min, y_min, x_max, y_max = x_min - tile_x, y_min - tile_y, x_max - tile_x, y_max - tile_y
+            x_min, y_min, x_max, y_max = max(0, x_min), max(0, y_min), min(tile_size, x_max), min(tile_size, y_max)
+
+            # Keep only boxes inside the tile
+            if x_max > x_min and y_max > y_min:
+                tile_boxes.append([x_min, y_min, x_max, y_max])
+                box_indices.append(i)
+
+        return tile_boxes, box_indices
+
+    def __len__(self):
+        return len(self.tiles)
+
+    def __getitem__(self, idx):
+        image, tile_boxes, tile_labels = self.tiles[idx]
+
+        # Convert to tensors
+        image = tv_tensors.Image(image)
+        boxes = tv_tensors.BoundingBoxes(tile_boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(self.tile_size, self.tile_size))
+        labels = torch.tensor(tile_labels, dtype=torch.int64)
+
+        sample = {"image": image, "boxes": boxes, "labels": labels}
+
+        if self.transform:
+            sample = self.transform(sample)
+
+        return sample["image"], {"boxes": sample["boxes"], "labels": sample["labels"]}
 
 def inspect_dataset_sample(
     sample: Tuple[tv_tensors.Image,

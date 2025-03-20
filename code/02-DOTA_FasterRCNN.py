@@ -15,17 +15,18 @@ import json
 import os
 
 import torchvision
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, FasterRCNN_ResNet50_FPN_Weights
 from torchinfo import summary
 from torch.optim import SGD
 from torch.utils.tensorboard import SummaryWriter
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 import sys
 sys.path.append('/dss/dsshome1/0A/di38tac/DOTA-Net/code')
-from utils.dataset import DOTA_DATASET
-from utils.training import train, validate
+from utils.dataset import DOTA_DATASET_v2
+from utils.training import prepare_map_predictions, prepare_map_targets
 
-DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
+DOTA_SET = 'dota' # possible values: dota-subset, dota
 SPLIT = 'train' # possible values: train, val, test-dev
 
 DATA_ROOT = Path('/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022/data/')
@@ -34,8 +35,8 @@ DOTA_ROOT = DATA_ROOT / DOTA_SET
 META_FILE = DOTA_ROOT / 'meta.json'
 LABELS_DIR = DOTA_ROOT / SPLIT / 'ann'
 IMGS_DIR = DOTA_ROOT / SPLIT / 'img'
-CSV_DIR = Path(f'/dss/dsshome1/0A/di38tac/DOTA-Net/Data/csv-files/{DOTA_SET}')
-csv_file = CSV_DIR / f'{SPLIT}_split.csv'
+
+model_name = 'FasterRCNN'
 
 # Transformations
 def train_transforms() -> v2.Compose:
@@ -89,14 +90,14 @@ def collate_fn(batch: List[Tuple[Tensor, Dict[str, Tensor]]]) -> Tuple[List[Tens
 
 # Datasets and Dataloaders ----------------------------------
 
-TRAIN_BATCH_SIZE = 32
-VAL_BATCH_SIZE = 32
+TRAIN_BATCH_SIZE = 64
+VAL_BATCH_SIZE = 64
 
-train_dataset = DOTA_DATASET(
-    csv_file=CSV_DIR / 'train_split.csv', 
+train_dataset = DOTA_DATASET_v2(
+    csv_file=DOTA_ROOT / 'train_split.csv', 
     root_img_dir=DOTA_ROOT / 'train' / 'img', 
     tile_size=1024, 
-    overlap=200, 
+    overlap=100, 
     transform=train_transforms()
 )
 
@@ -104,17 +105,17 @@ train_loader = DataLoader(
     train_dataset,
     batch_size=TRAIN_BATCH_SIZE,
     shuffle=True,
-    num_workers=2,
+    num_workers=4,
     prefetch_factor=2,
     drop_last=True,
     collate_fn=collate_fn,
 )
 
-val_dataset = DOTA_DATASET(
-    csv_file=CSV_DIR / 'val_split.csv', 
+val_dataset = DOTA_DATASET_v2(
+    csv_file=DOTA_ROOT / 'val_split.csv', 
     root_img_dir=DOTA_ROOT / 'val' / 'img', 
     tile_size=1024, 
-    overlap=200, 
+    overlap=100, 
     transform=val_transforms()
 )
 
@@ -122,14 +123,18 @@ val_loader = DataLoader(
     val_dataset,
     batch_size=VAL_BATCH_SIZE,
     shuffle=True,
-    num_workers=2,
+    num_workers=4,
     prefetch_factor=2,
     drop_last=True,
     collate_fn=collate_fn,
 )
 
+print("Dataloader ready.")
+
 # Model Setup -------------------------------------------
-model = torchvision.models.detection.fasterrcnn_resnet50_fpn(trainable_backbone_layers=2)
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
+    trainable_backbone_layers=5,
+    weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
 num_classes = 19
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
@@ -142,9 +147,8 @@ print("Starting Training Pipeline.")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _ = model.to(device)
-print(device)
+print(f"Device: {device}")
 
-from utils.training import prepare_map_predictions
 
 def train(dataloader, model, optimizer, epoch, writer):
     model.train()
@@ -218,7 +222,7 @@ ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
 USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
 
-EXPERIMENT_GROUP = "DOTA"
+EXPERIMENT_GROUP = f"DOTA_{model_name}" # subfolder for model
 EXPERIMENT_ID = "exp_001"
 EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
 EXPERIMENT_DIR.mkdir(parents=True, exist_ok=True)
@@ -228,12 +232,15 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 
 writer = SummaryWriter(EXPERIMENT_DIR / EXPERIMENT_ID)
 
-num_epochs = 5
+num_epochs = 10
 optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0005)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
 
 best_val_loss = float('inf')
 best_checkpoint_path = None
+
+# the val score threshold is used to determine if a prediction should be considered
+VAL_SCORE_THRESHOLD = 0.5
 
 for epoch in range(num_epochs):
     avg_train_loss = train(train_loader, model, optimizer, epoch, writer)
