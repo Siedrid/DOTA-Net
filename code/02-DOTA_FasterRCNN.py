@@ -26,7 +26,7 @@ sys.path.append('/dss/dsshome1/0A/di38tac/DOTA-Net/code')
 from utils.dataset import DOTA_DATASET_v2
 from utils.training import prepare_map_predictions, prepare_map_targets
 
-DOTA_SET = 'dota' # possible values: dota-subset, dota
+DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
 SPLIT = 'train' # possible values: train, val, test-dev
 
 DATA_ROOT = Path('/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022/data/')
@@ -100,6 +100,7 @@ train_dataset = DOTA_DATASET_v2(
     overlap=100, 
     transform=train_transforms()
 )
+print(len(train_dataset))
 
 train_loader = DataLoader(
     train_dataset,
@@ -118,7 +119,7 @@ val_dataset = DOTA_DATASET_v2(
     overlap=100, 
     transform=val_transforms()
 )
-
+print(len(val_dataset))
 val_loader = DataLoader(
     val_dataset,
     batch_size=VAL_BATCH_SIZE,

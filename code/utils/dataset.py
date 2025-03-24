@@ -17,6 +17,7 @@ import os
 import sys
 import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
+from shapely.geometry import box
 
 class DOTA_DATASET(Dataset):
     def __init__(self, csv_file: str, root_img_dir: str, tile_size=1024, overlap=200, transform=None):
@@ -108,6 +109,16 @@ class DOTA_DATASET(Dataset):
         return sample["image"], target
 
 ## New Dataset Class
+import torch
+import torchvision.transforms.functional as TF
+import pandas as pd
+import PIL.Image
+from pathlib import Path
+from torch.utils.data import Dataset
+import torchvision.tv_tensors as tv_tensors
+
+# add progress for dataset loading
+
 class DOTA_DATASET_v2(Dataset):
     def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None):
         self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
@@ -120,17 +131,25 @@ class DOTA_DATASET_v2(Dataset):
         # **PRECOMPUTE SLIDING WINDOW TILES**
         for idx in range(len(self.annotations)):
             img_name = self.annotations.iloc[idx, 0]
-            boxes_string = self.annotations.iloc[idx, 1]
-            labels_string = self.annotations.iloc[idx, 2]
+            boxes_string = str(self.annotations.iloc[idx, 1])
+            labels_string = str(self.annotations.iloc[idx, 2])
 
             # Read and convert the full image ONCE
             img_path = Path(self.root_img_dir) / img_name
             img = PIL.Image.open(img_path).convert("RGB")  # Ensure RGB mode
-            w, h = img.size
 
+            # Pad the image if it's smaller than tile_size
+            img, pad_left, pad_top = self._pad_image(img)
+
+            w, h = img.size  # Updated size after padding
+
+            #print(boxes_string)
             # Parse bounding boxes
-            boxes = [list(map(int, box.split())) for box in boxes_string.split(";")]
-            labels = [int(label) for label in labels_string.split(';')]
+            boxes = [list(map(int, box.split())) for box in boxes_string.split(";") if box != 'nan']
+            labels = [int(label) for label in labels_string.split(';') if label.strip().isdigit()]
+
+            # Adjust bounding boxes for padding
+            boxes = [[x_min + pad_left, y_min + pad_top, x_max + pad_left, y_max + pad_top] for x_min, y_min, x_max, y_max in boxes]
 
             stride = tile_size - overlap
             for y in range(0, h - overlap, stride):
@@ -142,20 +161,46 @@ class DOTA_DATASET_v2(Dataset):
                         tile_img = TF.crop(img, y, x, tile_size, tile_size)
                         self.tiles.append((tile_img, tile_boxes, tile_labels))
 
-    def _adjust_boxes(self, boxes, tile_x, tile_y, tile_size):
+    def _pad_image(self, img):
+        """Pads images smaller than tile_size to tile_size x tile_size with zeros."""
+        w, h = img.size
+        pad_left = max(0, (self.tile_size - w) // 2)  # Center horizontally
+        pad_top = max(0, (self.tile_size - h) // 2)  # Center vertically
+        pad_right = max(0, self.tile_size - (w + pad_left))  # Ensure full padding
+        pad_bottom = max(0, self.tile_size - (h + pad_top))
+
+        img = TF.pad(img, (pad_left, pad_top, pad_right, pad_bottom), fill=0)  # Zero-padding (black)
+        return img, pad_left, pad_top  # Return image and padding values
+
+    def _adjust_boxes(self, boxes, tile_x, tile_y, tile_size, iou_threshold=0.7):
         """Clips bounding boxes and returns valid ones with indices."""
         tile_boxes, box_indices = [], []
-        for i, (x_min, y_min, x_max, y_max) in enumerate(boxes):
-            # Shift and clip coordinates
-            x_min, y_min, x_max, y_max = x_min - tile_x, y_min - tile_y, x_max - tile_x, y_max - tile_y
-            x_min, y_min, x_max, y_max = max(0, x_min), max(0, y_min), min(tile_size, x_max), min(tile_size, y_max)
+        tile_poly = box(tile_x, tile_y, tile_x + tile_size, tile_y + tile_size)
 
-            # Keep only boxes inside the tile
-            if x_max > x_min and y_max > y_min:
-                tile_boxes.append([x_min, y_min, x_max, y_max])
-                box_indices.append(i)
+        for i, (x_min, y_min, x_max, y_max) in enumerate(boxes):
+            box_poly = box(x_min, y_min, x_max, y_max)
+            inter_poly, half_iou = self._calc_half_iou(box_poly, tile_poly)
+            
+            if half_iou >= iou_threshold:
+                x_min, y_min, x_max, y_max = map(int, inter_poly.bounds)
+                x_min, y_min, x_max, y_max = x_min - tile_x, y_min - tile_y, x_max - tile_x, y_max - tile_y
+                x_min, y_min, x_max, y_max = max(0, x_min), max(0, y_min), min(tile_size, x_max), min(tile_size, y_max)
+                if x_max > x_min and y_max > y_min:
+                    tile_boxes.append([x_min, y_min, x_max, y_max])
+                    box_indices.append(i)
 
         return tile_boxes, box_indices
+
+    def _calc_half_iou(self, poly1, poly2):
+        """
+        It is not the IoU on usual, the IoU is the value of intersection over poly1
+        https://github.com/dingjiansw101/AerialDetection/blob/master/DOTA_devkit/ImgSplit_multi_process.py#L163
+        """
+        inter_poly = poly1.intersection(poly2)
+        inter_area = inter_poly.area
+        poly1_area = poly1.area
+        half_iou = inter_area / poly1_area if poly1_area > 0 else 0
+        return inter_poly, half_iou
 
     def __len__(self):
         return len(self.tiles)
