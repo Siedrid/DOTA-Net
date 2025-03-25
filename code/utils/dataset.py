@@ -19,95 +19,6 @@ import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 from shapely.geometry import box
 
-class DOTA_DATASET(Dataset):
-    def __init__(self, csv_file: str, root_img_dir: str, tile_size=1024, overlap=200, transform=None):
-        self.csv_file = csv_file
-        self.annotations = self._read_df()
-        self.root_img_dir = root_img_dir
-        self.tile_size = tile_size
-        self.overlap = overlap
-        self.transform = transform
-        self.tiles = self._prepare_tiles()
-
-    def _read_df(self):
-        """Reads CSV annotations and resets index."""
-        return pd.read_csv(self.csv_file).reset_index(drop=True)
-
-    def _prepare_tiles(self):
-        """Prepares a list of image tiles with their corresponding bounding boxes."""
-        tiles = []
-        for idx in range(len(self.annotations)):
-            img_name = self.annotations.iloc[idx, 0]
-            boxes_string = self.annotations.iloc[idx, 1]
-            boxes = [list(map(int, box.split())) for box in boxes_string.split(";")]
-
-            img_path = Path(self.root_img_dir) / img_name
-            img = PIL.Image.open(img_path)
-            w, h = img.size  # Get original image dimensions
-
-            # Compute tile positions
-            stride = self.tile_size - self.overlap
-            for y in range(0, h - self.overlap, stride):
-                for x in range(0, w - self.overlap, stride):
-                    tile_boxes, box_indices = self._adjust_boxes(boxes, x, y, self.tile_size)
-                    if tile_boxes:
-                        tiles.append((idx, x, y, tile_boxes, box_indices))
-        return tiles
-
-    def _adjust_boxes(self, boxes, tile_x, tile_y, tile_size):
-        """Adjusts bounding boxes for a given tile and clips if outside tile bounds."""
-        tile_boxes = []
-        box_indices = []
-        for bbox_idx, box in enumerate(boxes):
-            x_min, y_min, x_max, y_max = box
-            # Shift coordinates relative to the tile
-            x_min -= tile_x
-            y_min -= tile_y
-            x_max -= tile_x
-            y_max -= tile_y
-
-            # Clip the bounding box to the tile boundaries (ensure coordinates are within tile size)
-            x_min = max(0, x_min)
-            y_min = max(0, y_min)
-            x_max = min(tile_size, x_max)
-            y_max = min(tile_size, y_max)
-
-            # Only include boxes that are inside the tile
-            if x_max > x_min and y_max > y_min:
-                tile_boxes.append([x_min, y_min, x_max, y_max])
-                box_indices.append(bbox_idx)
-
-        return tile_boxes, box_indices
-
-    def __len__(self):
-        return len(self.tiles)
-
-    def __getitem__(self, idx):
-        img_idx, tile_x, tile_y, tile_boxes, box_indices = self.tiles[idx]
-        img_name = Path(self.root_img_dir) / self.annotations.iloc[img_idx, 0]
-
-        # Open and crop image
-        full_image = PIL.Image.open(img_name)
-        image = TF.crop(full_image, tile_y, tile_x, self.tile_size, self.tile_size)
-
-        # Convert to tv_tensors
-        image = tv_tensors.Image(image)
-        boxes = tv_tensors.BoundingBoxes(
-            tile_boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(self.tile_size, self.tile_size)
-        )
-
-        # Get labels
-        labels_string = self.annotations.iloc[img_idx, 2]
-        labels = [int(cl) for cl in labels_string.split(';')]
-        labels = torch.tensor([labels[i] for i in box_indices], dtype=torch.int64)
-
-        # Apply transformations
-        sample = {"image": image, "boxes": boxes, "labels": labels}
-        if self.transform:
-            sample = self.transform(sample)
-        target = {"boxes": sample["boxes"], "labels": sample["labels"]}
-        return sample["image"], target
-
 ## New Dataset Class
 import torch
 import torchvision.transforms.functional as TF
@@ -118,7 +29,6 @@ from torch.utils.data import Dataset
 import torchvision.tv_tensors as tv_tensors
 
 # add progress for dataset loading
-
 class DOTA_DATASET_v2(Dataset):
     def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None):
         self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
@@ -136,7 +46,7 @@ class DOTA_DATASET_v2(Dataset):
 
             # Read and convert the full image ONCE
             img_path = Path(self.root_img_dir) / img_name
-            img = PIL.Image.open(img_path).convert("RGB")  # Ensure RGB mode
+            img = PIL.Image.open(img_path) 
 
             # Pad the image if it's smaller than tile_size
             img, pad_left, pad_top = self._pad_image(img)
@@ -210,7 +120,11 @@ class DOTA_DATASET_v2(Dataset):
 
         # Convert to tensors
         image = tv_tensors.Image(image)
-        boxes = tv_tensors.BoundingBoxes(tile_boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(self.tile_size, self.tile_size))
+        boxes = tv_tensors.BoundingBoxes(
+            tile_boxes, 
+            format=tv_tensors.BoundingBoxFormat.XYXY, 
+            canvas_size=image.shape[-2:])
+        
         labels = torch.tensor(tile_labels, dtype=torch.int64)
 
         sample = {"image": image, "boxes": boxes, "labels": labels}
@@ -219,6 +133,43 @@ class DOTA_DATASET_v2(Dataset):
             sample = self.transform(sample)
 
         return sample["image"], {"boxes": sample["boxes"], "labels": sample["labels"]}
+
+# Dataset class for preprocessed DOTA images
+class DOTA_preprocessed(Dataset):
+    def __init__(self, csv_file, root_img_dir, transform=None):
+        self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
+        self.root_img_dir = root_img_dir
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.annotations)
+
+    def __getitem__(self, idx):
+        img_name = self.annotations.iloc[idx, 0]
+        boxes_string = str(self.annotations.iloc[idx, 1])
+        labels_string = str(self.annotations.iloc[idx, 2])
+
+        img_path = Path(self.root_img_dir) / img_name
+        img = tv_tensors.Image(PIL.Image.open(img_path))
+        
+        # check this
+        boxes = [list(map(int, box.split())) for box in boxes_string.split(";") if box != 'nan']
+        labels = [int(label) for label in labels_string.split(';') if label.strip().isdigit()]
+        labels = torch.tensor([labels[i] for i in range(boxes)], dtype=torch.int64)
+
+        boxes = tv_tensors.BoundingBoxes(
+            boxes,
+            format=tv_tensors.BoundingBoxFormat.XYXY, # specific format with xmin ymin etc.
+            canvas_size=img.shape[-2:]
+        ) 
+
+        sample = {"image": img, "boxes": boxes, "labels": labels}
+        if self.transform:
+            sample = self.transform(sample)
+        # Create the target dictionary
+        target = {"boxes": sample["boxes"], "labels": sample["labels"]
+        }
+        return sample["image"], target
 
 def inspect_dataset_sample(
     sample: Tuple[tv_tensors.Image,
