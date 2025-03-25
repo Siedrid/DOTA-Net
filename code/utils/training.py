@@ -8,12 +8,14 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator, TensorEvent
 from torch import Tensor
 from torchvision import tv_tensors
 from torchvision.transforms import v2
 import json
 import os
 import sys
+import re
 
 
 def prepare_map_predictions(predictions: List[Dict[str, torch.Tensor]], threshold: Optional[float] = None) -> List[Dict[str, torch.Tensor]]:
@@ -155,3 +157,71 @@ def validate(dataloader, model, epoch, writer):
     print(f'mAP_50: {mAP_values["map_50"]}')
     print(f'mAP_75: {mAP_values["map_75"]}')
     return avg_val_loss
+
+def get_best_checkpoint_path(file_path: str) -> Optional[str]:
+    """
+    Extracts the best checkpoint path from the TensorBoard event file.
+
+    This function reads the TensorBoard event file, looks for the scalar summary
+    under the tag "Best Checkpoint Path/text_summary", parses the associated tensor
+    events, and returns the checkpoint path of the best model.
+
+    Parameters
+    ----------
+    file_path : str
+        The path to the TensorBoard event file that contains the summary information.
+
+    Returns
+    -------
+    Optional[str]
+        The checkpoint path of the best model, or None if no such checkpoint path is found.
+    """
+    ea = EventAccumulator(file_path)
+    ea.Reload()
+
+    for scalar in ea.Tags().get("tensors", []):
+        if scalar == "Best Checkpoint Path/text_summary":
+            events = ea.Tensors(scalar)
+    
+    if not events:
+        return None
+    
+    tensor_event_dict = parse_tensor_events(events)
+    return tensor_event_dict[-1]["checkpoint_path"]
+
+def parse_tensor_events(tensor_events: List[TensorEvent]) -> List[Dict[str, Optional[float | str]]]:
+    """
+    Parse a list of tensor events to extract `val_loss` and `checkpoint_path`.
+
+    Parameters
+    ----------
+    tensor_events : List[TensorEvent]
+        A list of TensorEvent objects. Each object is expected to have a `tensor_proto` attribute
+        containing a method `SerializeToString()` that returns a serialized byte string.
+
+    Returns
+    -------
+    List[Dict[str, Optional[float | str]]]
+        A list of dictionaries. Each dictionary contains:
+        - "val_loss" (float or None): The extracted validation loss value.
+        - "checkpoint_path" (str or None): The extracted checkpoint file path.
+    """
+    parsed_data = []
+    for event in tensor_events:
+        event_dict = {}
+        # Extract the string value (assuming `tensor_proto` contains the relevant string)
+        event_string = event.tensor_proto.SerializeToString().decode('utf-8', errors='ignore')
+        match = re.search(r'val_loss:([^@]+)', event_string)
+        if match:
+            val_loss = match.group(1)  # Extract the matched value
+            event_dict['val_loss'] = float(val_loss)
+        else:
+            event_dict['val_loss'] = None
+        match = re.search(r'@(.+)', event_string)
+        if match:
+            path = match.group(1)  # Extract the matched value
+            event_dict['checkpoint_path'] = path
+        else:
+            event_dict['checkpoint_path'] = None
+        parsed_data.append(event_dict)
+    return parsed_data
