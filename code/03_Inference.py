@@ -44,6 +44,14 @@ model_name = 'FasterRCNN'
 
 ## or upload model to github
 best_checkpoint_path = get_best_checkpoint_path("path")
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn()
+num_classes = 19
+in_features = model.roi_heads.box_predictor.cls_score.in_features
+
+model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+
+checkpoint = torch.load(best_checkpoint_path, weights_only=False)
+model.load_state_dict(checkpoint['model_state_dict'])
 
 ## new inference dataset class needed
 def inference_transforms() -> v2.Compose:
@@ -69,7 +77,8 @@ def inference_transforms() -> v2.Compose:
 from utils.preprocess_dota import preprocess_dota_dataset
 
 print("Preprocessing dataset...")
-out_split_imgs = USER_PATH / "DATA/SlidingWindow" / DOTA_SET / SPLIT
+out_split_imgs = USER_PATH / "DATA" / "SlidingWindow" / DOTA_SET / SPLIT
+os.makedirs(out_split_imgs, exist_ok=True)
 
 # do this also in batches
 # or change to a simple sliding window function, which is part of all the other functions
@@ -111,6 +120,9 @@ class DOTA_Inference(Dataset):
         return sample['image'], sample['image_id']
     
 # Load the model
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device: {device}")
+
 # make predictions
 def predict(dataloader, model):
     results = []
@@ -127,14 +139,47 @@ def predict(dataloader, model):
                 labels = prediction["labels"].cpu().numpy()
                 scores = prediction["scores"].cpu().numpy()
                 results.append(
-                    [image_id[i], boxes, labels, scores]
-                    # keep as dict maybe
+                    {
+                        "image_id": image_id[i],
+                        "boxes": boxes,
+                        "labels": labels,
+                        "scores": scores,
+                    }
                 )
     return results
+
+inference_dataset = DOTA_Inference(
+    csv_file=out_split_imgs / "ann" / "annotations.csv",
+    root_img_dir=out_split_imgs / "img",
+    transform=inference_transforms()
+)
+
+inference_data_loader = DataLoader(
+    inference_dataset,
+    batch_size=124,
+    shuffle=False,
+    num_workers=4,
+    prefetch_factor=2,
+    drop_last=False
+)
 
 predictions = predict(inference_data_loader, model)
 
 # write predictions to csv
 # convert boxes and labels to strings
-prediction_df = pd.DataFrame(predictions, columns=["image_id", "boxes", "labels", "scores"])
+predicted = []
+for prediction in predictions:
+    boxes = prediction["boxes"]
+    labels = prediction["labels"]
+    scores = prediction["scores"]
+
+    new_box_string = ";".join([" ".join(map(str, box)) for box in boxes])
+    new_label_string = ";".join(map(str, labels))
+
+    annotations = [prediction["image_id"], new_box_string, new_label_string, scores]
+    
+    predicted.append(annotations)
+
+prediction_df = pd.DataFrame(predicted, columns=["image_id", "boxes", "labels", "scores"])
+
 # visualize in new notebook
