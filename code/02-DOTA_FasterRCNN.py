@@ -23,7 +23,7 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 import sys
 sys.path.append('/dss/dsshome1/0A/di38tac/DOTA-Net/code')
-from utils.dataset import DOTA_DATASET_v2
+from utils.dataset import DOTA_DATASET_v2, DOTA_preprocessed
 from utils.training import prepare_map_predictions, prepare_map_targets
 
 DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
@@ -37,6 +37,10 @@ LABELS_DIR = DOTA_ROOT / SPLIT / 'ann'
 IMGS_DIR = DOTA_ROOT / SPLIT / 'img'
 
 model_name = 'FasterRCNN'
+ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
+USER = "di38tac"
+USER_PATH = ROOT / f"users/{USER}"
+preprocessed_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET
 
 # Transformations
 def train_transforms() -> v2.Compose:
@@ -92,7 +96,7 @@ def collate_fn(batch: List[Tuple[Tensor, Dict[str, Tensor]]]) -> Tuple[List[Tens
 
 TRAIN_BATCH_SIZE = 64
 VAL_BATCH_SIZE = 64
-
+"""
 train_dataset = DOTA_DATASET_v2(
     csv_file=DOTA_ROOT / 'train_split.csv', 
     root_img_dir=DOTA_ROOT / 'train' / 'img', 
@@ -100,7 +104,29 @@ train_dataset = DOTA_DATASET_v2(
     overlap=100, 
     transform=train_transforms()
 )
-print(len(train_dataset))
+
+val_dataset = DOTA_DATASET_v2(
+    csv_file=DOTA_ROOT / 'val_split.csv', 
+    root_img_dir=DOTA_ROOT / 'val' / 'img', 
+    tile_size=1024, 
+    overlap=100, 
+    transform=val_transforms()
+)
+print("Dataloader ready.")
+"""
+# Preprocessed DOTA Set Dataloaders
+
+train_dataset = DOTA_preprocessed(
+    csv_file=preprocessed_dir / 'train' / "ann/annotations.csv",
+    root_img_dir=preprocessed_dir / 'train' / "img",
+    transform=train_transforms()
+)
+
+val_dataset = DOTA_preprocessed(
+    csv_file=preprocessed_dir / 'val' / "ann/annotations.csv",
+    root_img_dir=preprocessed_dir / 'val' / "img",
+    transform=val_transforms()
+)
 
 train_loader = DataLoader(
     train_dataset,
@@ -112,14 +138,6 @@ train_loader = DataLoader(
     collate_fn=collate_fn,
 )
 
-val_dataset = DOTA_DATASET_v2(
-    csv_file=DOTA_ROOT / 'val_split.csv', 
-    root_img_dir=DOTA_ROOT / 'val' / 'img', 
-    tile_size=1024, 
-    overlap=100, 
-    transform=val_transforms()
-)
-print(len(val_dataset))
 val_loader = DataLoader(
     val_dataset,
     batch_size=VAL_BATCH_SIZE,
@@ -130,7 +148,7 @@ val_loader = DataLoader(
     collate_fn=collate_fn,
 )
 
-print("Dataloader ready.")
+
 
 # Model Setup -------------------------------------------
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
@@ -223,7 +241,7 @@ ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
 USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
 
-EXPERIMENT_GROUP = f"DOTA_{model_name}" # subfolder for model
+EXPERIMENT_GROUP = f"DOTA-preprocessed_{model_name}" # subfolder for model
 EXPERIMENT_ID = "exp_001"
 EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
 EXPERIMENT_DIR.mkdir(parents=True, exist_ok=True)

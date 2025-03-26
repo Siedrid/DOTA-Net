@@ -137,17 +137,30 @@ class DOTA_DATASET_v2(Dataset):
 # Dataset class for preprocessed DOTA images
 class DOTA_preprocessed(Dataset):
     def __init__(self, csv_file, root_img_dir, transform=None):
-        self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
+        self.csv_file = csv_file
+        self.annotations = self._exclude_no_box_samples()
         self.root_img_dir = root_img_dir
         self.transform = transform
+
+    def _exclude_no_box_samples(self) -> pd.DataFrame:
+        """Exclude samples where BoxesString is 'no_box'.
+
+        Returns
+        -------
+        pd.DataFrame
+            The annotations data frame without the samples where BoxesString is 'no_box'.
+        """
+        annotations = pd.read_csv(self.csv_file)
+        annotations = annotations.dropna()
+        return annotations.reset_index(drop=True)
 
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, idx):
         img_name = self.annotations.iloc[idx, 0]
-        boxes_string = str(self.annotations.iloc[idx, 1])
-        labels_string = str(self.annotations.iloc[idx, 2])
+        boxes_string = str(self.annotations.iloc[idx, 2])
+        labels_string = str(self.annotations.iloc[idx, 3])
 
         img_path = Path(self.root_img_dir) / img_name
         img = tv_tensors.Image(PIL.Image.open(img_path))
@@ -155,7 +168,7 @@ class DOTA_preprocessed(Dataset):
         # check this
         boxes = [list(map(int, box.split())) for box in boxes_string.split(";") if box != 'nan']
         labels = [int(label) for label in labels_string.split(';') if label.strip().isdigit()]
-        labels = torch.tensor([labels[i] for i in range(boxes)], dtype=torch.int64)
+        labels = torch.tensor([labels[i] for i in range(len(boxes))], dtype=torch.int64)
 
         boxes = tv_tensors.BoundingBoxes(
             boxes,
