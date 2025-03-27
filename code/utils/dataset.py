@@ -28,14 +28,14 @@ from pathlib import Path
 from torch.utils.data import Dataset
 import torchvision.tv_tensors as tv_tensors
 
-# add progress for dataset loading
 class DOTA_DATASET_v2(Dataset):
-    def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None):
+    def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None, difficult=True):
         self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
         self.root_img_dir = root_img_dir
         self.tile_size = tile_size
         self.overlap = overlap
         self.transform = transform
+        self.difficult = difficult
         self.tiles = []  # Store precomputed tiles
 
         # **PRECOMPUTE SLIDING WINDOW TILES**
@@ -43,6 +43,10 @@ class DOTA_DATASET_v2(Dataset):
             img_name = self.annotations.iloc[idx, 0]
             boxes_string = str(self.annotations.iloc[idx, 1])
             labels_string = str(self.annotations.iloc[idx, 2])
+            difficult_string = str(self.annotations.iloc[idx, 3])
+
+            if idx % 10 == 0:
+                print(f"Image [{idx}/{len(self.annotations)}] is being processed...")
 
             # Read and convert the full image ONCE
             img_path = Path(self.root_img_dir) / img_name
@@ -57,6 +61,7 @@ class DOTA_DATASET_v2(Dataset):
             # Parse bounding boxes
             boxes = [list(map(int, box.split())) for box in boxes_string.split(";") if box != 'nan']
             labels = [int(label) for label in labels_string.split(';') if label.strip().isdigit()]
+            difficult_tags = difficult_string.split(';')
 
             # Adjust bounding boxes for padding
             boxes = [[x_min + pad_left, y_min + pad_top, x_max + pad_left, y_max + pad_top] for x_min, y_min, x_max, y_max in boxes]
@@ -66,10 +71,16 @@ class DOTA_DATASET_v2(Dataset):
                 for x in range(0, w - overlap, stride):
                     tile_boxes, box_indices = self._adjust_boxes(boxes, x, y, tile_size)
                     tile_labels = [labels[i] for i in box_indices]
+                    diff_tags = [difficult_tags[i] for i in box_indices]
+
+                    if self.difficult == False and len(box_indices) > 0:
+                        tile_boxes = [box for box, tag in zip(tile_boxes, diff_tags) if tag.lower() == "false"]
+                        tile_labels = [lab for lab, tag in zip(tile_labels, diff_tags) if tag.lower() == "false"]
 
                     if tile_boxes:  # Only store valid tiles with at least one box
                         tile_img = TF.crop(img, y, x, tile_size, tile_size)
-                        self.tiles.append((tile_img, tile_boxes, tile_labels))
+                        tile_info = {"original_img": img_name, "x": x, "y": y}
+                        self.tiles.append((tile_img, tile_boxes, tile_labels, tile_info))
 
     def _pad_image(self, img):
         """Pads images smaller than tile_size to tile_size x tile_size with zeros."""
@@ -116,7 +127,7 @@ class DOTA_DATASET_v2(Dataset):
         return len(self.tiles)
 
     def __getitem__(self, idx):
-        image, tile_boxes, tile_labels = self.tiles[idx]
+        image, tile_boxes, tile_labels, tile_info = self.tiles[idx]
 
         # Convert to tensors
         image = tv_tensors.Image(image)
@@ -128,11 +139,12 @@ class DOTA_DATASET_v2(Dataset):
         labels = torch.tensor(tile_labels, dtype=torch.int64)
 
         sample = {"image": image, "boxes": boxes, "labels": labels}
+        target = {"boxes": sample["boxes"], "labels": sample["labels"]}
 
         if self.transform:
             sample = self.transform(sample)
 
-        return sample["image"], {"boxes": sample["boxes"], "labels": sample["labels"]}
+        return sample["image"], target # return also tile_info?
 
 # Dataset class for preprocessed DOTA images
 class DOTA_preprocessed(Dataset):
@@ -143,7 +155,7 @@ class DOTA_preprocessed(Dataset):
         self.transform = transform
 
     def _exclude_no_box_samples(self) -> pd.DataFrame:
-        """Exclude samples where BoxesString is 'no_box'.
+        """Exclude samples where BoxesString is 'NaN'.
 
         Returns
         -------
@@ -161,6 +173,7 @@ class DOTA_preprocessed(Dataset):
         img_name = self.annotations.iloc[idx, 0]
         boxes_string = str(self.annotations.iloc[idx, 2])
         labels_string = str(self.annotations.iloc[idx, 3])
+        #difficult_tag = str(self.annotations.iloc[idx,]) # not yet in preprocessed csv
 
         img_path = Path(self.root_img_dir) / img_name
         img = tv_tensors.Image(PIL.Image.open(img_path))
