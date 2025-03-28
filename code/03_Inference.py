@@ -1,3 +1,4 @@
+#%%
 from pathlib import Path
 from typing import Callable, Optional, Tuple, Dict, List
 import pandas as pd
@@ -29,21 +30,29 @@ from utils.training import get_best_checkpoint_path
 DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
 SPLIT = 'test-dev' # possible values: train, val, test-dev
 
-DATA_ROOT = Path('/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022/data/')
+ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
+DATA_ROOT = ROOT / 'data'
 DOTA_ROOT = DATA_ROOT / DOTA_SET
 
 META_FILE = DOTA_ROOT / 'meta.json'
 LABELS_DIR = DOTA_ROOT / SPLIT / 'ann'
 IMGS_DIR = DOTA_ROOT / SPLIT / 'img'
 
-ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
 USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
+csv_file = DOTA_ROOT / f'{SPLIT}_split.csv'
 
 model_name = 'FasterRCNN'
 
 ## or upload model to github
-best_checkpoint_path = get_best_checkpoint_path("path")
+EXPERIMENT_GROUP = f"{DOTA_SET}_{model_name}" # subfolder for model
+EXPERIMENT_ID = "exp_001"
+EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
+
+exp_fls = os.listdir(EXPERIMENT_DIR / "exp_001")
+checkpoint = EXPERIMENT_DIR / "exp_001" / exp_fls[2]
+
+best_checkpoint_path = get_best_checkpoint_path(str(checkpoint))
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn()
 num_classes = 19
 in_features = model.roi_heads.box_predictor.cls_score.in_features
@@ -74,29 +83,33 @@ def inference_transforms() -> v2.Compose:
 
 # Pipeline:
 # Preprocess the images 
-from utils.preprocess_dota import preprocess_dota_dataset
 
 print("Preprocessing dataset...")
-out_split_imgs = USER_PATH / "DATA" / "SlidingWindow" / DOTA_SET / SPLIT
-os.makedirs(out_split_imgs, exist_ok=True)
+from utils.preprocess_dota import DotaPreprocessor, preprocess_dota_dataset_v0
 
-# do this also in batches
-# or change to a simple sliding window function, which is part of all the other functions
+out_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET / SPLIT
+os.makedirs(out_dir, exist_ok=True)
+"""
 
-preprocess_dota_dataset(
-    csv_file=LABELS_DIR / f"{SPLIT}.csv",
+# uncomment this to process the data.
+
+preprocessor = DotaPreprocessor(
+    csv_file=csv_file,
     root_img_dir=IMGS_DIR,
-    output_dir=out_split_imgs,
+    output_dir=out_dir,
     tile_size=1024,
     overlap=200,
-    boxes=None
+    boxes=True,
+    num_workers=8
 )
 
-print(f"Preprocessing done. Image Tiles saved to {out_split_imgs}.")
+preprocessor.process_all_images()
+"""
 # Create the dataset class
 
 class DOTA_Inference(Dataset):
     def __init__(self, csv_file, root_img_dir, transform=None):
+        self.csv_file = csv_file
         self.annotations = self._read_df()
         self.root_img_dir = root_img_dir
         self.transform = transform
@@ -123,7 +136,7 @@ class DOTA_Inference(Dataset):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
-# make predictions
+# make predictions preprocessed
 def predict(dataloader, model):
     results = []
     model.eval()
@@ -149,10 +162,11 @@ def predict(dataloader, model):
     return results
 
 inference_dataset = DOTA_Inference(
-    csv_file=out_split_imgs / "ann" / "annotations.csv",
-    root_img_dir=out_split_imgs / "img",
+    csv_file=out_dir / "ann" / "annotations.csv",
+    root_img_dir=out_dir / "img",
     transform=inference_transforms()
 )
+print("Size of Inference Data is:", len(inference_dataset))
 
 inference_data_loader = DataLoader(
     inference_dataset,
@@ -182,4 +196,12 @@ for prediction in predictions:
 
 prediction_df = pd.DataFrame(predicted, columns=["image_id", "boxes", "labels", "scores"])
 
-# visualize in new notebook
+INFERENCE_DIR = out_dir / "Inference" 
+os.makedirs(INFERENCE_DIR, exist_ok=True)
+
+out_path = INFERENCE_DIR / f"{model_name}-{EXPERIMENT_ID}_predictions.csv"
+prediction_df.to_csv(out_path, index=False)
+
+print(f"Predictions for Test-Dev Dataset are saved to {out_path}.")
+#%%
+# # visualize in new notebook
