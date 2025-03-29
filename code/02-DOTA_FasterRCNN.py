@@ -25,40 +25,68 @@ import sys
 sys.path.append('/dss/dsshome1/0A/di38tac/DOTA-Net/code')
 from utils.dataset import DOTA_DATASET_v2, DOTA_preprocessed
 from utils.training import prepare_map_predictions, prepare_map_targets, EarlyStopping
+from utils.preprocess_dota import DotaPreprocessor
 
 DOTA_SET = 'dota' # possible values: dota-subset, dota
-#SPLIT = 'train' # possible values: train, val, test-dev
+dota_splits = ['train', 'val', 'test-dev']
 
 ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
 DATA_ROOT = ROOT / 'data'
 DOTA_ROOT = DATA_ROOT / DOTA_SET
-
-#META_FILE = DOTA_ROOT / 'meta.json'
-#LABELS_DIR = DOTA_ROOT / SPLIT / 'ann'
-
+USER = "di38tac"
+USER_PATH = ROOT / f"users/{USER}"
 
 model_name = 'FasterRCNN'
 
-USER = "di38tac"
-USER_PATH = ROOT / f"users/{USER}"
-preprocessed_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET
-DOTA_ROOT = preprocessed_dir
+# Global Variables
+num_epochs = 100
+TRAIN_BATCH_SIZE = 64
+VAL_BATCH_SIZE = 64
+VAL_SCORE_THRESHOLD = 0.5
+EXPERIMENT_ID = "exp_002"
+PREPROCESSING = False
+
+# Model Setup -------------------------------------------
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
+    trainable_backbone_layers=5,
+    weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+num_classes = 19
+in_features = model.roi_heads.box_predictor.cls_score.in_features
+model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+
+early_stopping = EarlyStopping(patience=5, delta=0.01)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0005)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
 
 # Checkpoint for preprocessing------------------
 
-PREPROCESSING = True
-
-IMGS_DIR = DOTA_ROOT / 'train' / 'img' # check all splits
-img_path = IMGS_DIR / os.listdir(IMGS_DIR)[1] # open random image to check dims
-img = PIL.Image.open(img_path)
-w, h = img.size
-
-if w == 1024 and h == w:
-    PREPROCESSING = False
-    print(f"Images in the directory {IMGS_DIR} have size 1024x1024. No preprocessing needed.")
-
 if PREPROCESSING:
     print("Preprocessing Pipeline started.")
+
+    for SPLIT in dota_splits:
+
+        print(f"Preprocessing {SPLIT} split.")
+        out_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET / SPLIT
+        os.makedirs(out_dir, exist_ok=True)
+        csv_file = DOTA_ROOT / f'{SPLIT}_split.csv'
+        IMGS_DIR = DOTA_ROOT / SPLIT / 'img'
+
+        preprocessor = DotaPreprocessor(
+            csv_file=csv_file,
+            root_img_dir=IMGS_DIR,
+            output_dir=out_dir,
+            tile_size=1024,
+            overlap=200,
+            boxes=True,
+            num_workers=8
+        )
+
+        preprocessor.process_all_images()
+
+    DOTA_ROOT = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET
+
+else:
+    DOTA_ROOT = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET
 
 # Transformations
 def train_transforms() -> v2.Compose:
@@ -112,9 +140,6 @@ def collate_fn(batch: List[Tuple[Tensor, Dict[str, Tensor]]]) -> Tuple[List[Tens
 
 # Datasets and Dataloaders ----------------------------------
 
-TRAIN_BATCH_SIZE = 64
-VAL_BATCH_SIZE = 64
-
 if PREPROCESSING:
     print("Preparing Dataloaders...")
     train_dataset = DOTA_DATASET_v2(
@@ -139,14 +164,14 @@ if PREPROCESSING:
 else:
     # Preprocessed DOTA Set Dataloaders
     train_dataset = DOTA_preprocessed(
-        csv_file=preprocessed_dir / 'train' / "ann/annotations.csv",
-        root_img_dir=preprocessed_dir / 'train' / "img",
+        csv_file=DOTA_ROOT / 'train' / "ann/annotations.csv",
+        root_img_dir=DOTA_ROOT / 'train' / "img",
         transform=train_transforms() # add difficulty
     )
 
     val_dataset = DOTA_preprocessed(
-        csv_file=preprocessed_dir / 'val' / "ann/annotations.csv",
-        root_img_dir=preprocessed_dir / 'val' / "img",
+        csv_file=DOTA_ROOT / 'val' / "ann/annotations.csv",
+        root_img_dir=DOTA_ROOT / 'val' / "img",
         transform=val_transforms()
     )
 
@@ -172,16 +197,6 @@ val_loader = DataLoader(
 
 print("Size of Training Data is:", len(train_dataset))
 print("Size of Validation Data is:", len(val_dataset))
-
-# Model Setup -------------------------------------------
-model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
-    trainable_backbone_layers=3,
-    weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
-num_classes = 19
-in_features = model.roi_heads.box_predictor.cls_score.in_features
-model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-
-early_stopping = EarlyStopping(patience=5, delta=0.01)
 
 # Training Pipeline -------------------------------
 print("Starting Training Pipeline.")
@@ -265,7 +280,6 @@ USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
 
 EXPERIMENT_GROUP = f"{DOTA_SET}_{model_name}" # subfolder for model
-EXPERIMENT_ID = "exp_001"
 EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
 EXPERIMENT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -274,15 +288,10 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 
 writer = SummaryWriter(EXPERIMENT_DIR / EXPERIMENT_ID)
 
-num_epochs = 10
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0005)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
-
 best_val_loss = float('inf')
 best_checkpoint_path = None
 
 # the val score threshold is used to determine if a prediction should be considered
-VAL_SCORE_THRESHOLD = 0.5
 
 for epoch in range(num_epochs):
     avg_train_loss = train(train_loader, model, optimizer, epoch, writer)
