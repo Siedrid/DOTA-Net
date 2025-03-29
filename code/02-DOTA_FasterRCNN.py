@@ -275,9 +275,7 @@ def validate(dataloader, model, epoch, writer):
 # Main function -----------------------------
 
 # setup writer
-ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
-USER = "di38tac"
-USER_PATH = ROOT / f"users/{USER}"
+USER_PATH = Path("/dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN")
 
 EXPERIMENT_GROUP = f"{DOTA_SET}_{model_name}" # subfolder for model
 EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
