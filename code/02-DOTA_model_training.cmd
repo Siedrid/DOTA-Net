@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J DOTA_model_training
-#SBATCH -o /dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN/logfiles/stdout.logfile
-#SBATCH -e /dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN/logfiles/stderr.logfile
+#SBATCH -o /dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN/logfiles/exp_003/stdout.logfile
+#SBATCH -e /dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN/logfiles/exp_003/stderr.logfile
 #SBATCH -D /dss/dsshome1/0A/di38tac
 #SBATCH --clusters=hpda2
 #SBATCH --partition=hpda2_compute_gpu

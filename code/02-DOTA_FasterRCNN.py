@@ -43,7 +43,7 @@ num_epochs = 100
 TRAIN_BATCH_SIZE = 64
 VAL_BATCH_SIZE = 64
 VAL_SCORE_THRESHOLD = 0.5
-EXPERIMENT_ID = "exp_002"
+EXPERIMENT_ID = "exp_003"
 PREPROCESSING = False
 
 # Model Setup -------------------------------------------
@@ -54,7 +54,7 @@ num_classes = 19
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
-early_stopping = EarlyStopping(patience=5, delta=0.01)
+early_stopping = EarlyStopping(patience=10, delta=0.005)
 optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0005)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
 
@@ -166,13 +166,15 @@ else:
     train_dataset = DOTA_preprocessed(
         csv_file=DOTA_ROOT / 'train' / "ann/annotations.csv",
         root_img_dir=DOTA_ROOT / 'train' / "img",
-        transform=train_transforms() # add difficulty
+        transform=train_transforms(),
+        difficult=False
     )
 
     val_dataset = DOTA_preprocessed(
         csv_file=DOTA_ROOT / 'val' / "ann/annotations.csv",
         root_img_dir=DOTA_ROOT / 'val' / "img",
-        transform=val_transforms()
+        transform=val_transforms(),
+        difficult=False
     )
 
 train_loader = DataLoader(

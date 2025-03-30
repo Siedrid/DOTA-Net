@@ -148,23 +148,29 @@ class DOTA_DATASET_v2(Dataset):
 
 # Dataset class for preprocessed DOTA images
 class DOTA_preprocessed(Dataset):
-    def __init__(self, csv_file, root_img_dir, transform=None):
+    def __init__(self, csv_file, root_img_dir, transform=None, difficult=True):
         self.csv_file = csv_file
-        self.annotations = self._exclude_no_box_samples()
         self.root_img_dir = root_img_dir
         self.transform = transform
+        self.difficult = difficult
+        self.annotations = self._exclude_no_box_samples()
 
     def _exclude_no_box_samples(self) -> pd.DataFrame:
         """Exclude samples where BoxesString is 'NaN'.
-
-        Returns
-        -------
-        pd.DataFrame
-            The annotations data frame without the samples where BoxesString is 'no_box'.
+        Additionally, exclude samples where all difficult tags are 'true' when self.difficult is False.
         """
-        annotations = pd.read_csv(self.csv_file)
-        annotations = annotations.dropna()
+        annotations = pd.read_csv(self.csv_file).dropna()
+        
+        if self.difficult is False:
+            # Filter out rows where all difficult tags are 'true'
+            def has_non_true_difficult_tags(row):
+                difficult_tags = [tag.strip().lower() for tag in str(row['difficult']).split(';')]
+                return any(tag != "true" for tag in difficult_tags)
+            
+            annotations = annotations[annotations.apply(has_non_true_difficult_tags, axis=1)]
+        
         return annotations.reset_index(drop=True)
+
 
     def __len__(self):
         return len(self.annotations)
@@ -173,7 +179,7 @@ class DOTA_preprocessed(Dataset):
         img_name = self.annotations.iloc[idx, 0]
         boxes_string = str(self.annotations.iloc[idx, 2])
         labels_string = str(self.annotations.iloc[idx, 3])
-        #difficult_tag = str(self.annotations.iloc[idx,]) # not yet in preprocessed csv
+        difficult_string = str(self.annotations.iloc[idx,4]) 
 
         img_path = Path(self.root_img_dir) / img_name
         img = tv_tensors.Image(PIL.Image.open(img_path))
@@ -181,8 +187,13 @@ class DOTA_preprocessed(Dataset):
         # check this
         boxes = [list(map(int, box.split())) for box in boxes_string.split(";") if box != 'nan']
         labels = [int(label) for label in labels_string.split(';') if label.strip().isdigit()]
-        labels = torch.tensor([labels[i] for i in range(len(boxes))], dtype=torch.int64)
+        difficult_tags = [tag.strip().lower() for tag in difficult_string.split(";")]
 
+        if self.difficult is False:
+            filtered_data = [(box, lab) for box, lab, tag in zip(boxes, labels, difficult_tags) if tag == "false"]
+            boxes, labels = zip(*filtered_data) if filtered_data else ([], [])
+        
+        labels = torch.tensor([labels[i] for i in range(len(boxes))], dtype=torch.int64)
         boxes = tv_tensors.BoundingBoxes(
             boxes,
             format=tv_tensors.BoundingBoxFormat.XYXY, # specific format with xmin ymin etc.
@@ -193,48 +204,40 @@ class DOTA_preprocessed(Dataset):
         if self.transform:
             sample = self.transform(sample)
         # Create the target dictionary
-        target = {"boxes": sample["boxes"], "labels": sample["labels"]
-        }
+        target = {"boxes": sample["boxes"], "labels": sample["labels"]}
+
         return sample["image"], target
 
-def inspect_dataset_sample(
-    sample: Tuple[tv_tensors.Image,
-    Dict[tv_tensors.BoundingBoxes, torch.Tensor]]
-) -> None:
+def val_transforms() -> v2.Compose:
+        """
+        Transformations to be applied to the validation dataset samples.
+
+        Returns
+        -------
+        v2.Compose
+            A composition of the transformations to be applied to the dataset samples.
+        """
+        return v2.Compose(
+            [
+                v2.ToDtype(torch.float32, scale=True)
+            ]
+        )
+
+def collate_fn(batch: List[Tuple[Tensor, Dict[str, Tensor]]]) -> Tuple[List[Tensor], List[Dict[str, Tensor]]]:
     """
-    Inspect a dataset sample by printing its components' types and attributes.
-    
+    Custom collate function to correctly batch the provided tensors by the dataset.
+
     Parameters
     ----------
-    sample : Tuple[tv_tensors.Image, Dict[tv_tensors.BoundingBoxes, torch.Tensor]]
-        A tuple containing an image tensor and a dictionary with bounding boxes and labels.
-    """
-    img, target = sample
-    def print_inspection(title: str, data: Dict[str, Any]) -> None:
-        print(title)
-        for key, value in data.items():
-            print(f"{key} = {value}")
-        print("")
-    print_inspection("Inspect img:", {
-        "type(img)": type(img),
-        "img.shape": img.shape,
-        "img.dtype": img.dtype
-    })
-    print_inspection("Inspect target:", {
-        "type(target)": type(target),
-        "target.keys()": target.keys()
-    })
-    print_inspection("Inspect target['boxes']:", {
-        "type(target['boxes'])": type(target['boxes']),
-        "target['boxes'].dtype": target['boxes'].dtype,
-        "target['boxes'].canvas_size": target['boxes'].canvas_size,
-        "target['boxes'].format": target['boxes'].format
-    })
-    print_inspection("Inspect target['labels']:", {
-        "type(target['labels'])": type(target['labels']),
-        "target['labels'].dtype": target['labels'].dtype
-    })
+    batch : List[Tuple[Tensor, Dict[str, Tensor]]]
+        A list of tuples where each tuple contains an image tensor and its corresponding target dictionary.
 
+    Returns
+    -------
+    Tuple[List[Tensor], List[Dict[str, Tensor]]]
+        A tuple containing two lists - one for images and one for target dictionaries.
+    """
+    return tuple(zip(*batch))
 
 def plot_image_with_boxes(
     image: torch.Tensor,

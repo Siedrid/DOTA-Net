@@ -1,2 +1,5 @@
 /.venv
 /.vscode
+/code/utils/__pycache__/
+/Data
+/FasterRCNN
