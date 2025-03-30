@@ -69,12 +69,14 @@ def plot_sample(df, ROOT, n=1):
     plt.show()
 
 def plot_class_accuracy(df):
+    df = df.sort_values(by="Accuracy", ascending=False)
     colors = [hotkey_to_color[int(class_id)] for class_id in df.Class]
     class_names = [class_name[int(class_id)] for class_id in df.Class]
 
     fig, axes = plt.subplots(figsize=(13,6))
     axes.bar(class_names, df.Accuracy, color = colors)
     axes.set_title("Per Class Accuracy")
+    axes.tick_params("x", rotation=45)
     plt.tight_layout()
     plt.show()
 
