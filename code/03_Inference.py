@@ -31,6 +31,7 @@ DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
 SPLIT = 'test-dev' # possible values: train, val, test-dev
 
 ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
+home = Path("/dss/dsshome1/0A/di38tac/DOTA-Net")
 DATA_ROOT = ROOT / 'data'
 DOTA_ROOT = DATA_ROOT / DOTA_SET
 
@@ -45,12 +46,12 @@ csv_file = DOTA_ROOT / f'{SPLIT}_split.csv'
 model_name = 'FasterRCNN'
 
 ## or upload model to github
-EXPERIMENT_GROUP = f"{DOTA_SET}_{model_name}" # subfolder for model
-EXPERIMENT_ID = "exp_001"
-EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
+EXPERIMENT_GROUP = f"dota_{model_name}" 
+EXPERIMENT_ID = "exp_003"
+EXPERIMENT_DIR = home / model_name / f"experiments/{EXPERIMENT_GROUP}" / EXPERIMENT_ID
 
-exp_fls = os.listdir(EXPERIMENT_DIR / "exp_001")
-checkpoint = EXPERIMENT_DIR / "exp_001" / exp_fls[2]
+exp_fls = os.listdir(EXPERIMENT_DIR)
+checkpoint = EXPERIMENT_DIR / exp_fls[0]
 
 best_checkpoint_path = get_best_checkpoint_path(str(checkpoint))
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn()
@@ -189,8 +190,9 @@ for prediction in predictions:
 
     new_box_string = ";".join([" ".join(map(str, box)) for box in boxes])
     new_label_string = ";".join(map(str, labels))
+    score_string = ";".join(map(str, scores))
 
-    annotations = [prediction["image_id"], new_box_string, new_label_string, scores]
+    annotations = [prediction["image_id"], new_box_string, new_label_string, score_string]
     
     predicted.append(annotations)
 

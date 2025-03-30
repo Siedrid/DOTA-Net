@@ -1,3 +1,4 @@
+#%%
 import pandas as pd
 import matplotlib.pyplot as plt
 import os 
@@ -18,33 +19,63 @@ META_FILE = DOTA_ROOT / 'meta.json'
 with open(META_FILE) as f:
     meta = json.load(f)  # Example: { "plane": 1, "ship": 2, ... }
 hotkey_to_color = {cls['hotkey']: cls['color'] for cls in meta['classes']}
+class_name = {cls['hotkey']: cls['title'] for cls in meta['classes']}
 
+#%%
 # plot samples with boxes
 def plot_sample(df, ROOT, n=1):
-    rdm_img = df.sample(n=n).iloc[0]
+    rdm_img = df.sample(n=1).iloc[0]
     img_split_path = ROOT / "img" / rdm_img['image_id']
 
     if pd.isna(rdm_img['boxes']) or pd.isna(rdm_img['labels']):
         boxes_split = []
         classes_split = []
+        scores_split = []
     else:
         boxes_split = rdm_img['boxes'].split(';')
         classes_split = list(map(int, rdm_img['labels'].split(';')))
+        scores_split = rdm_img['scores'].split(';')
 
     img = plt.imread(img_split_path)
 
     fig, ax = plt.subplots()
     ax.imshow(img)
+
+    legend_patches = {}
     #ax.set_title(f"Splitted Image: {rdm_split['tile_filename']}.")
-    for box, class_id in zip(boxes_split,classes_split):
+    for box, class_id, score in zip(boxes_split,classes_split, scores_split):
         x_min, y_min, x_max, y_max = map(float, box.split())
         width = x_max - x_min
         height = y_max - y_min
         color = hotkey_to_color[int(class_id)]
 
-        rect = patches.Rectangle((x_min, y_min), width, height, linewidth=2, edgecolor=color, facecolor='none')
+        if float(score) < 0.5:
+            alpha = 0.5
+        else: 
+            alpha = 1
+
+        rect = patches.Rectangle(
+            (x_min, y_min), width, height, 
+            linewidth=2, edgecolor=color, facecolor='none', alpha=alpha)
         ax.add_patch(rect)
 
+        if class_id not in legend_patches:
+            legend_patches[class_id] = patches.Patch(
+                color=color, 
+                label=class_name[int(class_id)])
+    if legend_patches:
+        ax.legend(handles=list(legend_patches.values()), loc="upper right", title="Classes")
+
+    plt.show()
+
+def plot_class_accuracy(df):
+    colors = [hotkey_to_color[int(class_id)] for class_id in df.Class]
+    class_names = [class_name[int(class_id)] for class_id in df.Class]
+
+    fig, axes = plt.subplots(figsize=(13,6))
+    axes.bar(class_names, df.Accuracy, color = colors)
+    axes.set_title("Per Class Accuracy")
+    plt.tight_layout()
     plt.show()
 
 def plot_org_and_split(img_name, DOTA_ROOT, DOTA_PREP_ROOT, SPLIT):
