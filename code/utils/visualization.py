@@ -73,10 +73,16 @@ def plot_class_mAP(df):
     colors = [hotkey_to_color[int(class_id)] for class_id in df.Class]
     class_names = [class_name[int(class_id)] for class_id in df.Class]
 
-    fig, axes = plt.subplots(figsize=(13,6))
-    axes.bar(class_names, df.AP, color = colors)
-    axes.set_title("Per Class Average Precision")
-    axes.tick_params("x", rotation=45)
+    fig, axes = plt.subplots(1,2, figsize=(17,6))
+    axes[0].bar(class_names, df.AP, color = colors)
+    axes[0].set_title("Per Class Average Precision")
+    #axes[0].hlines(y=df.mAP[0], xmin= class_names[0], xmax=class_names[-1], linestyle='dashed')    
+    axes[0].tick_params("x", rotation=90)
+
+    axes[1].bar(class_names, df.mAR, color = colors)
+    axes[1].set_title("Per Class Average Recall")
+    axes[1].tick_params("x", rotation=90)
+
     plt.tight_layout()
     plt.show()
 
