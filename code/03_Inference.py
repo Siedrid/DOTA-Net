@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np 
 import PIL
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = None  # Disables the decompression bomb check
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
@@ -30,38 +29,69 @@ from utils.training import get_best_checkpoint_path
 DOTA_SET = 'dota-subset' # possible values: dota-subset, dota
 SPLIT = 'test-dev' # possible values: train, val, test-dev
 
+# Path to the original data, change this to preprocess your own data
+###########################################################
 ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
-home = Path("/dss/dsshome1/0A/di38tac/DOTA-Net")
 DATA_ROOT = ROOT / 'data'
 DOTA_ROOT = DATA_ROOT / DOTA_SET
-
-META_FILE = DOTA_ROOT / 'meta.json'
-LABELS_DIR = DOTA_ROOT / SPLIT / 'ann'
 IMGS_DIR = DOTA_ROOT / SPLIT / 'img'
+csv_file = DOTA_ROOT / f'{SPLIT}_split.csv'
+###########################################################
 
+print("Number of Images to preprocess: ", len(os.listdir(IMGS_DIR)))
+
+# in this directory the preprocessed images and annotations are stored
+# if you want to process your own data, change this to the desired output directory for your preprocessed data
+# and set preprocess to True
 USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
-csv_file = DOTA_ROOT / f'{SPLIT}_split.csv'
+out_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET / SPLIT
+os.makedirs(out_dir, exist_ok=True)
+preprocess=False
 
+# change this to match your root project directory to load the model
+##########################################################
+home = Path("/dss/dsshome1/0A/di38tac/DOTA-Net") 
+##########################################################
 model_name = 'FasterRCNN'
-
-## or upload model to github
 EXPERIMENT_GROUP = f"dota_{model_name}" 
 EXPERIMENT_ID = "exp_003"
+best_checkpoint_path = ""
+"""
 EXPERIMENT_DIR = home / model_name / f"experiments/{EXPERIMENT_GROUP}" / EXPERIMENT_ID
 
 exp_fls = os.listdir(EXPERIMENT_DIR)
 checkpoint = EXPERIMENT_DIR / exp_fls[0]
 
 best_checkpoint_path = get_best_checkpoint_path(str(checkpoint))
+"""
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn()
 num_classes = 19
 in_features = model.roi_heads.box_predictor.cls_score.in_features
-
 model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
 checkpoint = torch.load(best_checkpoint_path, weights_only=False)
 model.load_state_dict(checkpoint['model_state_dict'])
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device: {device}")
+
+# Pipeline:
+# Preprocess the images 
+if preprocess:
+    print("Preprocessing dataset...")
+    from utils.preprocess_dota import DotaPreprocessor, preprocess_dota_dataset_v0
+
+    preprocessor = DotaPreprocessor(
+        csv_file=csv_file,
+        root_img_dir=IMGS_DIR,
+        output_dir=out_dir,
+        tile_size=1024,
+        overlap=200,
+        boxes=True,
+        num_workers=8
+    )
+
+    preprocessor.process_all_images()
 
 ## new inference dataset class needed
 def inference_transforms() -> v2.Compose:
@@ -82,32 +112,7 @@ def inference_transforms() -> v2.Compose:
         ]
     )
 
-# Pipeline:
-# Preprocess the images 
-
-print("Preprocessing dataset...")
-from utils.preprocess_dota import DotaPreprocessor, preprocess_dota_dataset_v0
-
-out_dir = USER_PATH / "DATA"/ "SlidingWindow" / DOTA_SET / SPLIT
-os.makedirs(out_dir, exist_ok=True)
-"""
-
-# uncomment this to process the data.
-
-preprocessor = DotaPreprocessor(
-    csv_file=csv_file,
-    root_img_dir=IMGS_DIR,
-    output_dir=out_dir,
-    tile_size=1024,
-    overlap=200,
-    boxes=True,
-    num_workers=8
-)
-
-preprocessor.process_all_images()
-"""
 # Create the dataset class
-
 class DOTA_Inference(Dataset):
     def __init__(self, csv_file, root_img_dir, transform=None):
         self.csv_file = csv_file
@@ -133,9 +138,7 @@ class DOTA_Inference(Dataset):
             sample = self.transform(sample)
         return sample['image'], sample['image_id']
     
-# Load the model
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Device: {device}")
+
 
 # make predictions preprocessed
 def predict(dataloader, model):
@@ -204,6 +207,6 @@ os.makedirs(INFERENCE_DIR, exist_ok=True)
 out_path = INFERENCE_DIR / f"{model_name}-{EXPERIMENT_ID}_predictions.csv"
 prediction_df.to_csv(out_path, index=False)
 
-print(f"Predictions for Test-Dev Dataset are saved to {out_path}.")
+print(f"Predictions for {DOTA_SET}/{SPLIT} Dataset are saved to {out_path}.")
 #%%
 # # visualize in new notebook

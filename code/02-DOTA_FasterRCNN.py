@@ -33,18 +33,25 @@ dota_splits = ['train', 'val', 'test-dev']
 ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
 DATA_ROOT = ROOT / 'data'
 DOTA_ROOT = DATA_ROOT / DOTA_SET
+
+######################################################################################
+# if you want to preprocess the data yourself change this to your username
+# other wise keep mine, as I already preprocessed the data and stored it in my USER_PATH
 USER = "di38tac"
 USER_PATH = ROOT / f"users/{USER}"
 
-model_name = 'FasterRCNN'
+# path to write the tfeventfiles and checkpoints to, change this
+writer_path = Path("/dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN")
+######################################################################################
 
 # Global Variables
+model_name = 'FasterRCNN'
 num_epochs = 100
 TRAIN_BATCH_SIZE = 64
 VAL_BATCH_SIZE = 64
 VAL_SCORE_THRESHOLD = 0.5
 EXPERIMENT_ID = "exp_003"
-PREPROCESSING = False
+PREPROCESSING = False # True if you want to preprocess the data to 1024x1024 image chips first
 
 # Model Setup -------------------------------------------
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
@@ -107,38 +114,9 @@ def train_transforms() -> v2.Compose:
                 v2.ToDtype(torch.float32, scale=True)
             ]
         )
-def val_transforms() -> v2.Compose:
-        """
-        Transformations to be applied to the validation dataset samples.
-
-        Returns
-        -------
-        v2.Compose
-            A composition of the transformations to be applied to the dataset samples.
-        """
-        return v2.Compose(
-            [
-                v2.ToDtype(torch.float32, scale=True)
-            ]
-        )
-
-def collate_fn(batch: List[Tuple[Tensor, Dict[str, Tensor]]]) -> Tuple[List[Tensor], List[Dict[str, Tensor]]]:
-    """
-    Custom collate function to correctly batch the provided tensors by the dataset.
-
-    Parameters
-    ----------
-    batch : List[Tuple[Tensor, Dict[str, Tensor]]]
-        A list of tuples where each tuple contains an image tensor and its corresponding target dictionary.
-
-    Returns
-    -------
-    Tuple[List[Tensor], List[Dict[str, Tensor]]]
-        A tuple containing two lists - one for images and one for target dictionaries.
-    """
-    return tuple(zip(*batch))
 
 # Datasets and Dataloaders ----------------------------------
+from utils.dataset import val_transforms, collate_fn
 
 if PREPROCESSING:
     print("Preparing Dataloaders...")
@@ -277,13 +255,11 @@ def validate(dataloader, model, epoch, writer):
 # Main function -----------------------------
 
 # setup writer
-USER_PATH = Path("/dss/dsshome1/0A/di38tac/DOTA-Net/FasterRCNN")
-
 EXPERIMENT_GROUP = f"{DOTA_SET}_{model_name}" # subfolder for model
-EXPERIMENT_DIR = USER_PATH / f"experiments/{EXPERIMENT_GROUP}"
+EXPERIMENT_DIR = writer_path / f"experiments/{EXPERIMENT_GROUP}"
 EXPERIMENT_DIR.mkdir(parents=True, exist_ok=True)
 
-CHECKPOINTS_DIR = USER_PATH / f"checkpoints/{EXPERIMENT_GROUP}"
+CHECKPOINTS_DIR = writer_path / f"checkpoints/{EXPERIMENT_GROUP}"
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 
 writer = SummaryWriter(EXPERIMENT_DIR / EXPERIMENT_ID)
