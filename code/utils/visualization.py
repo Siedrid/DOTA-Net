@@ -8,6 +8,7 @@ import numpy as np
 import json
 from itertools import cycle
 import random
+from collections import Counter
 
 DOTA_SET = 'dota' # possible values: dota-subset, dota
 SPLIT = 'train' # possible values: train, val, test-dev
@@ -24,6 +25,13 @@ class_name = {cls['hotkey']: cls['title'] for cls in meta['classes']}
 #%%
 # plot samples with boxes
 def plot_sample(df, ROOT, n=1):
+    """
+    Plot a sample image with boxes and class legend.
+
+    Parameters:
+    df (pandas.Dataframe): Dataframe with the annotations, column names are boxes, scores, labels.
+    ROOT (string): Path to the root of the image directory for the respective images.
+    """
     rdm_img = df.sample(n=1).iloc[0]
     img_split_path = ROOT / "img" / rdm_img['image_id']
 
@@ -69,6 +77,12 @@ def plot_sample(df, ROOT, n=1):
     plt.show()
 
 def plot_class_mAP(df):
+    """
+    Creates and saves BarChart of the per class AveragePrecision and AverageRecall.
+
+    Parameters:
+    df (pandas.DataFrame): Pandas Dataframe with the columns "Class", "AP", "mAR" and "mAP" (mean Average Precision over all Classes).
+    """
     df = df.sort_values(by="AP", ascending=False)
     colors = [hotkey_to_color[int(class_id)] for class_id in df.Class]
     class_names = [class_name[int(class_id)] for class_id in df.Class]
@@ -76,7 +90,7 @@ def plot_class_mAP(df):
     fig, axes = plt.subplots(1,2, figsize=(17,6))
     axes[0].bar(class_names, df.AP, color = colors)
     axes[0].set_title("Per Class Average Precision")
-    #axes[0].hlines(y=df.mAP[0], xmin= class_names[0], xmax=class_names[-1], linestyle='dashed')    
+    axes[0].hlines(y=df.mAP[0], xmin= class_names[0], xmax=class_names[-1], linestyle='dashed')    
     axes[0].tick_params("x", rotation=90)
 
     axes[1].bar(class_names, df.mAR, color = colors)
@@ -84,9 +98,52 @@ def plot_class_mAP(df):
     axes[1].tick_params("x", rotation=90)
 
     plt.tight_layout()
+    plt.savefig("../media/barchart_mAP_mAR-DOTA.png", format="png")
     plt.show()
 
+def plot_class_freq(splits, dota_set):
+    """
+    Creates a bar chart of the number of objects per class for a specific split in a Dota Dataset.
+
+    Parameters:
+    splits (list): List of strings of the splits to visualize.
+    dota_set (string): Name of the Dataset, options: "dota" or "dota-subset".
+    """
+    ROOT = Path("/dss/dsstbyfs02/pn49ci/pn49ci-dss-0022")
+    DOTA_ROOT = ROOT / "users/di38tac" / "DATA"/ "SlidingWindow" / dota_set
+
+    fig, ax = plt.subplots(1, len(splits), figsize=(17,6))
+    
+    for i, SPLIT in enumerate(splits):
+        if SPLIT == 'test-dev':
+            csv_file = DOTA_ROOT / SPLIT / "Inference" / f"FasterRCNN-exp_003_predictions.csv"
+        else:
+            csv_file = DOTA_ROOT / SPLIT / 'ann' / 'annotations.csv'
+        df = pd.read_csv(csv_file)
+        class_strings = df['labels'].dropna().astype(str)
+        all_numbers = [num for row in class_strings for num in row.split(';')]
+
+        freq_counter = Counter(all_numbers)
+
+        freq_df = pd.DataFrame(freq_counter.items(), columns=['class_value', 'frequency'])
+        freq_df = freq_df.sort_values(by='frequency').reset_index(drop=True)
+        class_names = [class_name[int(class_id)] for class_id in freq_df.class_value]
+        colors = [hotkey_to_color[int(class_id)] for class_id in freq_df.class_value]
+
+        ax[i].bar(class_names, freq_df.frequency, color=colors)
+        ax[i].set_title(f"Class Balance for {dota_set}/{SPLIT}")
+        ax[i].tick_params("x", rotation=90)
+
 def plot_org_and_split(img_name, DOTA_ROOT, DOTA_PREP_ROOT, SPLIT):
+    """
+    Plots the original image and a chip of the original image after preprocessing.
+
+    Parameters:
+    img_name (string): name of the original image, usually "Pxxxx.png".
+    DOTA_ROOT (string): Path to the original Root of the Dota Dataset.
+    DOTA_PREP_ROOT (string): Path to the Root of the preprocessed Dota Dataset.
+    SPLIT (string): Split of the Dota Dataset, options: "test", "val".
+    """
     new_annotations = pd.read_csv(DOTA_PREP_ROOT / SPLIT / 'ann/annotations.csv')
     splits = new_annotations[new_annotations['original_image'] == img_name]
     if len(splits) == 0:

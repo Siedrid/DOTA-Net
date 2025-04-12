@@ -29,6 +29,17 @@ from torch.utils.data import Dataset
 import torchvision.tv_tensors as tv_tensors
 
 class DOTA_DATASET_v2(Dataset):
+    """
+    Dataset class, which processes the images internally in a moving window approach to a tile size of 1024 (default).
+
+    Parameters:
+    csv_file (string): Path to the csv file with the Annotations.
+    root_img_dir (string): Path to the respective Image Directory.
+    tile_size (int): Width and Height of the resulting image chips. Default is 1024.
+    overlap (int): Overlap between the image chips. Default is 200.
+    transform (v2.Compose): Transformations to be applied to the Dataset.
+    difficult (True/False): Default is True, means that difficult objects are also used.
+    """
     def __init__(self, csv_file, root_img_dir, tile_size=1024, overlap=200, transform=None, difficult=True):
         self.annotations = pd.read_csv(csv_file).reset_index(drop=True)
         self.root_img_dir = root_img_dir
@@ -146,8 +157,16 @@ class DOTA_DATASET_v2(Dataset):
 
         return sample["image"], target # return also tile_info?
 
-# Dataset class for preprocessed DOTA images
 class DOTA_preprocessed(Dataset):
+    """
+    Dataset Class for Images preprocessed to one size.
+
+    Parameters:
+    csv_file (string): Path to the csv file with the Annotations.
+    root_img_dir (string): Path to the respective Image Directory.
+    transform (v2.Compose): Transformations to be applied to the Dataset.
+    difficult (True/False): Default is True, means that difficult objects are also used.
+    """
     def __init__(self, csv_file, root_img_dir, transform=None, difficult=True):
         self.csv_file = csv_file
         self.root_img_dir = root_img_dir

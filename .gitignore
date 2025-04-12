@@ -2,4 +2,6 @@
 /.vscode
 /code/utils/__pycache__/
 /Data
-/FasterRCNN
+/FasterRCNN/checkpoints
+/FasterRCNN/logfiles
+uv.lock
