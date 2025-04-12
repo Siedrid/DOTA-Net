@@ -56,15 +56,13 @@ home = Path("/dss/dsshome1/0A/di38tac/DOTA-Net")
 model_name = 'FasterRCNN'
 EXPERIMENT_GROUP = f"dota_{model_name}" 
 EXPERIMENT_ID = "exp_003"
-best_checkpoint_path = ""
-"""
-EXPERIMENT_DIR = home / model_name / f"experiments/{EXPERIMENT_GROUP}" / EXPERIMENT_ID
 
+EXPERIMENT_DIR = home / model_name / f"experiments/{EXPERIMENT_GROUP}" / EXPERIMENT_ID
 exp_fls = os.listdir(EXPERIMENT_DIR)
 checkpoint = EXPERIMENT_DIR / exp_fls[0]
 
 best_checkpoint_path = get_best_checkpoint_path(str(checkpoint))
-"""
+
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn()
 num_classes = 19
 in_features = model.roi_heads.box_predictor.cls_score.in_features
