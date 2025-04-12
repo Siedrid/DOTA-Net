@@ -7,6 +7,10 @@ The pth file of the model is stored in the repository's model folder.
 ## Tensorboard
 The tfevent file for visualization of the training process for the two experiments carried out can be found under `FasterRCNN`. When launching TensorBoard set the logdir to `~/DOTA-Net/FasterRCNN/experiments/dota_FasterRCNN`.
 
+![mAP Graph](https://github.com/Siedrid/DOTA-Net/blob/master/media/mAP_scalars.png)
+
+![Loss Graph](https://github.com/Siedrid/DOTA-Net/blob/master/media/loss_scalars.png)
+
 ## Dataset Preprocessing
 The original dataset is accesible via https://datasetninja.com/dota#download.  To perform a HBB Object Detection, the annotations were adjusted by Dr. Hoeser. The respective pipeline is described [here](https://github.com/thho/course_material_04_geo_oma24/blob/main/notebooks/04-hoes_th-DOTA_dataset_prep.ipynb).
 
@@ -70,7 +74,12 @@ The AP is 0 for container cranes and helipads.
 A potential explanation for the different performance of the model for the different objects is there number during training vs. inference. The most frequent objects are planes, vehicles. This could be accounted for by oversampling underrepresented classes before the training pipeline. The differing Ground Sampling Distances of the images have probably also an impact on the performance. This could be accounted for by adding more transformations to the train_transforms function, like different random zooms.
 
 ### Possible Improvements
-To improve the model for the object classes, that performed poorly, one could oversample the classes for which the model has difficulties to detect.
+1. Handle Class Imbalance: Class-aware sampling or oversampling to ensure better representation of rare classes during training.
+
+2. Improve multi-scale learning
+3. Try different backbones
+4. Add post-processing pipeline with class-specific score-thresholds and IoU thresholds.
+5. Per Class Evaluation with Confusion Matrices, Precision-Recall Curves for each category.
 
 ## References
 
